@@ -3,6 +3,7 @@
 mod async_batch;
 mod batch_size_tracker;
 mod block_executor;
+mod cache_warm_up_executor;
 mod db;
 mod executor_events;
 mod inner;
@@ -12,16 +13,9 @@ mod side_effects;
 mod state_root_compute;
 mod transaction_subscriptions;
 mod update_state;
-use std::boxed::Box;
-use std::marker::PhantomData;
-use std::num::NonZero;
-use std::path::Path;
-use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
 
 use crate::preferred::block_executor::RollupBlockExecutorConfig;
+use crate::preferred::cache_warm_up_executor::CacheWarmUpExecutor;
 use async_trait::async_trait;
 use axum::http::StatusCode;
 use batch_size_tracker::BatchSizeTracker;
@@ -50,6 +44,14 @@ use sov_rollup_interface::common::SlotNumber;
 use sov_rollup_interface::node::da::DaService;
 use sov_rollup_interface::TxHash;
 use state_root_compute::StateRootBackgroundTaskState;
+use std::boxed::Box;
+use std::marker::PhantomData;
+use std::num::NonZero;
+use std::path::Path;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc::{self};
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
@@ -128,6 +130,7 @@ where
         let shutdown_receiver = shutdown_sender.subscribe();
         let latest_state_update = state_update_receiver.borrow().clone();
         let da_address = da.get_signer().await;
+
         debug!(
             ?latest_state_update,
             %da_address,
@@ -188,7 +191,7 @@ where
         }
 
         let (state_root_compute_handle, state_root_compute_task) =
-            StateRootBackgroundTaskState::create(
+            StateRootBackgroundTaskState::create::<Rt>(
                 block_executors_shutdown_rx,
                 !config
                     .sequencer_kind_config
@@ -221,6 +224,17 @@ where
             shutdown_sender: shutdown_sender.clone(),
         };
 
+        let (cache_warm_up_executor, workers) = CacheWarmUpExecutor::spawn_execution_task::<Rt>(
+            latest_state_update.clone(),
+            rollup_exec_config.clone(),
+            config.clone(),
+        )
+        .await;
+
+        for worker in workers {
+            handles.push(worker);
+        }
+
         let tx_queue_id = Arc::new(AtomicU64::new(0));
         let (synchronized_state, synchronized_state_updator) = create(
             api_ledger_db.clone(),
@@ -236,6 +250,7 @@ where
             stop_at_rollup_height,
             rollup_exec_config.clone(),
             cached_txs.write_handle(),
+            cache_warm_up_executor.clone(),
         );
 
         let synchronized_state_task = synchronized_state.start().await;
@@ -807,6 +822,7 @@ where
             tracing::info!("The sequencer is shutting down. Cannot accept transactions");
             return Err(shut_down_error());
         }
+
         let original_tx_queue_id = self.tx_queue_id.load(Ordering::Acquire);
 
         let tx_hash = Rt::Auth::compute_tx_hash(&baked_tx).map_err(generic_accept_tx_error)?;
@@ -1071,15 +1087,28 @@ fn err_cant_fit_tx(current_batch_size: usize, max_batch_size: usize, tx_len: usi
     }
 }
 
-pub(crate) async fn exit_rollup(shutdown_sender: &watch::Sender<()>) {
+#[track_caller]
+pub(crate) fn exit_rollup(
+    shutdown_sender: &watch::Sender<()>,
+) -> impl std::future::Future<Output = ()> {
+    let location = std::panic::Location::caller();
+    exit_rollup_inner(shutdown_sender.clone(), location)
+}
+
+async fn exit_rollup_inner(
+    shutdown_sender: watch::Sender<()>,
+    location: &'static std::panic::Location<'static>,
+) {
     // In the Kubernetes environment, logs are sometimes lost during shutdown.
     // This delay ensures logs have time to be flushed before the application exits.
     tracing::info!("Shutting down the rollup");
     if shutdown_sender.send(()).is_err() {
-        tracing::error!("Failed to send shutdown signal");
+        tracing::error!("Failed to send shutdown signal: {location}");
     }
     sleep(Duration::from_secs(5)).await;
-    tracing::info!("Calling std::process::exit(1).");
+    let msg = format!("Calling std::process::exit(1): {location}");
+    tracing::error!(msg);
+    println!("{msg}");
     std::process::exit(1);
 }
 

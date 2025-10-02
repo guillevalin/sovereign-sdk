@@ -103,6 +103,8 @@ pub enum ProofReceiptContents<Address, Da: DaSpec, Root, StorageProof> {
 /// The context in which the execution is happening.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExecutionContext {
+    /// / The transaction is being executed in order to warm up the main executor cache.
+    SequencerWarmUp,
     /// The transaction is being executed by a sequencer before inclusion.
     Sequencer,
     /// The transaction is being executed by a node after inclusion.
@@ -110,10 +112,21 @@ pub enum ExecutionContext {
 }
 
 impl ExecutionContext {
+    // This string representation is used inside tracing::spans. The macro that creates
+    // spans only accepts const &'static str, and strum generates only &'static str.
+    // Therefore, we had to define these constants manually.
+
+    /// String representation of the SequencerWarmUp variant.
+    pub const SEQUENCER_WARM_UP: &'static str = "SequencerWarmUp";
+    /// String representation of the Sequencer variant.
+    pub const SEQUENCER: &'static str = "Sequencer";
+    /// String representation of the NODE variant.
+    pub const NODE: &'static str = "Node";
+
     /// Returns true if and only if `self` matches [`ExecutionContext::Sequencer`].
     pub fn is_sequencer(&self) -> bool {
         match self {
-            Self::Sequencer => true,
+            Self::Sequencer | Self::SequencerWarmUp => true,
             Self::Node => false,
         }
     }

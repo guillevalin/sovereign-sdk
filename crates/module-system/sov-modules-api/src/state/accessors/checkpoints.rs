@@ -1,5 +1,7 @@
 use sov_metrics::{StateAccessMetric, StateMetrics};
 use sov_rollup_interface::common::{SlotNumber, VisibleSlotNumber};
+#[cfg(feature = "native")]
+use sov_state::StateGetter;
 use sov_state::{IsValueCached, Namespace, SlotKey, SlotValue, StateAccesses, Storage};
 use tracing::trace;
 
@@ -7,10 +9,13 @@ use super::internals::{AccessoryDelta, Delta};
 use super::temp_cache::{CacheLookup, TempCache};
 use super::{BootstrapWorkingSet, BorshSerializedSize, UniversalStateAccessor};
 use crate::capabilities::{Kernel, RollupHeight};
+use crate::state::accessors::internals::FirstTimeReads;
 use crate::state::traits::PerBlockCache;
 #[cfg(feature = "native")]
 use crate::TxChangeSet;
 use crate::{GasMeter, Spec, VersionReader};
+#[cfg(feature = "native")]
+use sov_state::sequencer_state::RawStateChanges;
 
 /// This structure is responsible for storing the `read-write` set.
 ///
@@ -28,19 +33,31 @@ pub struct StateCheckpoint<S: Spec> {
     pub(super) metrics: StateMetrics,
 }
 
-type Write = (u64, Option<SlotValue>);
+#[cfg(feature = "native")]
+impl<S: Spec> StateCheckpoint<S> {
+    /// Convert the state checkpoint to a [`RawStateChanges`] instance.
+    pub fn to_raw_state_changes(mut self) -> RawStateChanges {
+        self.delta.commit_revertable_storage_cache();
+        RawStateChanges {
+            user: self.delta.user_cache.into(),
+            kernel: self.delta.kernel_cache.into(),
+            accessory: self.delta.accessory_writes,
+            rollup_height: self.rollup_height.get(),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 /// The list of changes from the state checkpoint
 pub struct ChangeSet {
     #[allow(missing_docs)]
-    pub changes: Vec<((SlotKey, sov_state::Namespace), Write)>,
+    pub changes: Vec<((SlotKey, sov_state::Namespace), Option<SlotValue>)>,
 }
 
 impl ChangeSet {
     /// Create a new `ChangeSet` from a vector of changes.
     #[must_use]
-    pub fn new(changes: Vec<((SlotKey, sov_state::Namespace), Write)>) -> Self {
+    pub fn new(changes: Vec<((SlotKey, sov_state::Namespace), Option<SlotValue>)>) -> Self {
         Self { changes }
     }
 }
@@ -49,6 +66,11 @@ impl<S: Spec> StateCheckpoint<S> {
     /// Check if key is in the cache.
     pub fn is_value_cached(&self, namespace: Namespace, key: &SlotKey) -> IsValueCached {
         self.delta.is_value_cached(namespace, key)
+    }
+
+    /// Keys and values that were read for the first time.
+    pub fn first_reads(&self) -> FirstTimeReads {
+        self.delta.first_reads()
     }
 
     /// Commits the revertable part of the `StateCheckpoint` cache.
@@ -80,6 +102,29 @@ impl<S: Spec> StateCheckpoint<S> {
         }
     }
 
+    /// Creates a new [`StateCheckpoint`] instance with the given intermediate state that will be checked before storage when a value isn't already present in the checkpoint.
+    #[cfg(feature = "native")]
+    pub fn new_with_uncomitted_changes<K: Kernel<S>>(
+        inner: S::Storage,
+        kernel: &K,
+        uncomitted_changes: Box<dyn StateGetter>,
+    ) -> Self {
+        Self::with_witness_and_uncomitted_changes(
+            inner,
+            Default::default(),
+            kernel,
+            Some(uncomitted_changes),
+        )
+    }
+
+    /// Replace the storage and intermediate state underlying the checkpoint in place. It is up to the caller
+    /// to ensure that the intermediate state is compatible with the new storage.
+    #[cfg(feature = "native")]
+    pub fn replace_storage(&mut self, inner: S::Storage, uncomitted_changes: Box<dyn StateGetter>) {
+        self.delta.inner = inner;
+        self.delta.uncomitted_changes = Some(uncomitted_changes);
+    }
+
     /// Returns a reference to the storage underlying the state checkpoint.
     #[cfg(feature = "native")]
     pub fn storage(&self) -> &S::Storage {
@@ -96,19 +141,6 @@ impl<S: Spec> StateCheckpoint<S> {
         new_checkpoint.rollup_height
     }
 
-    /// Replaces the underlying storage and prunes...
-    /// - Any writes older than or equal to the new rollup height
-    /// - All reads
-    #[cfg(feature = "native")]
-    pub fn replace_storage_and_prune<K: Kernel<S>>(&mut self, storage: S::Storage, kernel: &K) {
-        let new_checkpoint = Self::new(storage.clone(), kernel);
-        let new_rollup_height = new_checkpoint.rollup_height;
-        self.delta
-            .replace_storage_and_prune(storage, new_rollup_height.get());
-        // Prune the temp cache
-        std::mem::take(&mut self.cache);
-    }
-
     /// Creates a new [`StateCheckpoint`] instance without any changes, backed
     /// by the given [`Storage`].
     pub fn new<K: Kernel<S>>(inner: S::Storage, kernel: &K) -> Self {
@@ -122,7 +154,28 @@ impl<S: Spec> StateCheckpoint<S> {
         witness: <S::Storage as Storage>::Witness,
         kernel: &K,
     ) -> Self {
+        Self::with_witness_and_uncomitted_changes(
+            inner,
+            witness,
+            kernel,
+            #[cfg(feature = "native")]
+            None,
+        )
+    }
+
+    /// Creates a new [`StateCheckpoint`] instance without any changes, backed
+    /// by the given [`Storage`] and witness.
+    fn with_witness_and_uncomitted_changes<K: Kernel<S>>(
+        inner: S::Storage,
+        witness: <S::Storage as Storage>::Witness,
+        kernel: &K,
+        #[cfg(feature = "native")] uncomitted_changes: Option<Box<dyn StateGetter>>,
+    ) -> Self {
         let mut delta = Delta::with_witness(inner, witness);
+        #[cfg(feature = "native")]
+        {
+            delta.uncomitted_changes = uncomitted_changes;
+        }
         let mut metrics = StateMetrics::default();
         let mut bootstrap_state = BootstrapWorkingSet {
             inner: &mut delta,
@@ -151,9 +204,20 @@ impl<S: Spec> StateCheckpoint<S> {
         AccessoryDelta<S::Storage>,
         <S::Storage as Storage>::Witness,
     ) {
-        let (state_accesses, accesory_delta, witness, _storage) =
-            self.delta.freeze(self.rollup_height.get());
+        let (state_accesses, accesory_delta, witness, _storage) = self.delta.freeze();
         (state_accesses, accesory_delta, witness)
+    }
+
+    #[cfg(feature = "native")]
+    /// Extracts the accessory delta from this [`StateCheckpoint`].
+    pub fn take_accessory_delta(&mut self) -> AccessoryDelta<S::Storage> {
+        self.delta.take_accessory_delta()
+    }
+
+    #[cfg(feature = "native")]
+    /// Extracts the accessory delta from this [`StateCheckpoint`].
+    pub fn set_accessory_delta(&mut self, accessory_delta: AccessoryDelta<S::Storage>) {
+        self.delta.set_accessory_delta(accessory_delta);
     }
 
     /// Extracts ordered reads, writes, and witness from this [`StateCheckpoint`] and uses
@@ -169,8 +233,7 @@ impl<S: Spec> StateCheckpoint<S> {
         <S::Storage as Storage>::Witness,
         S::Storage,
     ) {
-        let (cache_log, accessory_delta, witness, storage) =
-            self.delta.freeze(self.rollup_height.get());
+        let (cache_log, accessory_delta, witness, storage) = self.delta.freeze();
         let _span = tracing::debug_span!("compute_state_root", scope = "node").entered();
         let (root, update) = storage
             .compute_state_update(cache_log, &witness, prev_state_root)
@@ -193,12 +256,6 @@ impl<S: Spec> StateCheckpoint<S> {
         self.delta.changes()
     }
 
-    #[cfg(feature = "native")]
-    /// Returns the list of all changes contained in the state checkpoint which were written after the target height.
-    pub fn changes_after(&mut self, height: u64) -> ChangeSet {
-        self.delta.changes_after(height)
-    }
-
     /// Directly apply a set of changes to the state checkpoint. This method should generally *not* be used
     /// during normal execution, since changes should happen through `StateValue` types which
     /// use the UniversalStateAccessor API. It is primarily intended for use in the sequencer, which has to manage
@@ -207,11 +264,11 @@ impl<S: Spec> StateCheckpoint<S> {
     // TODO: Remove this method if we stop using `StateCheckpoint` in the sequencer
     #[cfg(feature = "native")]
     pub fn apply_changes(&mut self, changeset: ChangeSet) {
-        for ((key, namespace), (height, value)) in changeset.changes {
+        for ((key, namespace), value) in changeset.changes {
             if let Some(value) = value {
-                self.delta.set(namespace, &key, value, height);
+                self.delta.set(namespace, &key, value);
             } else {
-                self.delta.delete(namespace, &key, height);
+                self.delta.delete(namespace, &key);
             }
         }
     }
@@ -224,7 +281,7 @@ impl<S: Spec> StateCheckpoint<S> {
     // TODO: Remove this method if we stop using `StateCheckpoint` in the sequencer
     #[cfg(feature = "native")]
     pub fn apply_tx_changes(&mut self, changeset: TxChangeSet) {
-        for ((key, namespace), value) in changeset.0 {
+        for ((key, namespace), value) in changeset.writes {
             if let Some(value) = value {
                 self.set_value(namespace, &key, value);
             } else {
@@ -275,12 +332,11 @@ impl<S: Spec> UniversalStateAccessor for StateCheckpoint<S> {
     }
 
     fn set_value(&mut self, namespace: Namespace, key: &SlotKey, value: SlotValue) {
-        self.delta
-            .set(namespace, key, value, self.rollup_height.get());
+        self.delta.set(namespace, key, value);
     }
 
     fn delete_value(&mut self, namespace: Namespace, key: &SlotKey) {
-        self.delta.delete(namespace, key, self.rollup_height.get());
+        self.delta.delete(namespace, key);
     }
 }
 

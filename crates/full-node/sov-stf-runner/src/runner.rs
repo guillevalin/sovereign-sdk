@@ -49,6 +49,7 @@ where
 {
     first_unprocessed_height_at_startup: u64,
     da_polling_interval: Duration,
+    da_total_timeout: Duration,
     da_service: Arc<Da>,
     da_height_at_genesis: u64,
     stf: Stf,
@@ -160,6 +161,25 @@ where
         sync_state: Arc<DaSyncState>,
     ) -> anyhow::Result<Self> {
         error_if_tokio_runtime_is_not_multi_threaded()?;
+        let mut background_handles = Vec::new();
+
+        // This sender is not used immediately,
+        // But when REST and RPC handlers start, sender is used to get another subscription.
+        let (secondary_shutdown_sender, mut secondary_shutdown_receiver) = watch::channel(());
+        secondary_shutdown_receiver.mark_unchanged();
+        let receiver_for_metrics = secondary_shutdown_receiver.clone();
+        let metrics_handle = tokio::spawn(async move {
+            if let Some(handle) =
+                sov_metrics::init_metrics_tracker(&monitoring_config, receiver_for_metrics)
+            {
+                handle.await?;
+            } else {
+                tracing::warn!("Metics have been initialized outside of runner, some measurements can be lost on shutdown");
+            };
+
+            Ok(())
+        });
+        background_handles.push(metrics_handle);
 
         let axum_config = &runner_config.http_config;
 
@@ -192,6 +212,7 @@ where
         };
 
         let da_polling_interval = Duration::from_millis(runner_config.da_polling_interval_ms);
+        let da_total_timeout = Duration::from_secs(runner_config.da_total_timeout_secs);
 
         let state_manager = StateManager::new(
             storage_manager,
@@ -202,6 +223,7 @@ where
             state_height_tracker,
             sync_state.clone(),
             da_polling_interval,
+            da_total_timeout,
         )?;
 
         let (sync_fetcher, fetcher_background_handle) = FinalizedBlocksBulkFetcher::new(
@@ -211,19 +233,12 @@ where
             shutdown_receiver.clone(),
         )
         .await?;
-
-        // This sender is not used immediately,
-        // But when REST and RPC handlers start, sender is used to get another subscription.
-        let (secondary_shutdown_sender, mut secondary_shutdown_receiver) = watch::channel(());
-        secondary_shutdown_receiver.mark_unchanged();
-
-        tokio::spawn(async move {
-            sov_metrics::init_metrics_tracker(&monitoring_config);
-        });
+        background_handles.push(fetcher_background_handle);
 
         Ok(Self {
             first_unprocessed_height_at_startup,
             da_polling_interval,
+            da_total_timeout,
             da_service: da_service.clone(),
             da_height_at_genesis: runner_config.genesis_height,
             stf,
@@ -234,7 +249,7 @@ where
             sync_fetcher,
             shutdown_receiver,
             secondary_shutdown_sender,
-            background_handles: vec![fetcher_background_handle],
+            background_handles,
             start_at_rollup_height,
             stop_at_rollup_height,
             save_tx_bodies: runner_config.save_tx_bodies,
@@ -406,7 +421,7 @@ where
         info!("Runner main loop is completed, keep shutting down...");
         if let Err(e) = self.secondary_shutdown_sender.send(()) {
             tracing::warn!(
-                ?e,
+                error = ?e,
                 "Failed to send secondary shutdown signal. Happens if no HTTP handlers are running"
             );
         }
@@ -452,7 +467,6 @@ where
         Ok(false)
     }
 
-    #[tracing::instrument(skip(self))]
     async fn process_next_slot(
         &mut self,
         mut next_da_height: NextDaHeightToProcess,
@@ -461,13 +475,21 @@ where
     ) -> anyhow::Result<Option<NextDaHeightToProcess>> {
         let loop_start = std::time::Instant::now();
         let prev_state_root = self.get_state_root().clone();
+        let span = tracing::info_span!("process_next_slot", next_da_height = next_da_height);
+
+        if let Some(h) = start_at_rollup_height {
+            span.record("start_at_rollup_height", tracing::field::display(h));
+        }
+        if let Some(h) = stop_at_rollup_height {
+            span.record("stop_at_rollup_height", tracing::field::display(h));
+        }
         debug!("Requesting DA block");
 
         let mut transaction_count = 0;
         let mut batch_count = 0;
         let get_block_start = std::time::Instant::now();
         let filtered_block = if next_da_height <= self.sync_fetcher.last_finalized_height {
-            // no reorg will happen for this height, it is safe to just pull it from the fetcher,
+            // no reorg will happen for this height; it is safe to just pull it from the fetcher,
             // which could have this block fetcher already
             self.sync_fetcher.get_block_at(next_da_height).await?
         } else {
@@ -477,10 +499,12 @@ where
                 self.sync_state.as_ref(),
                 next_da_height,
                 self.da_polling_interval,
+                self.da_total_timeout,
             )
             .await?
         };
         let get_block_time = get_block_start.elapsed();
+        tracing::trace!(time = ?get_block_time, header = %filtered_block.header().display(), "DA block has been fetched, preparing storage");
 
         let (stf_pre_state, filtered_block) = self
             .state_manager
@@ -652,7 +676,7 @@ where
         // halt further slot processing.
         if let Some(stop_at_rollup_height) = stop_at_rollup_height {
             if &slot_result.rollup_height == stop_at_rollup_height {
-                info!("Stopping at rollup height: {}", stop_at_rollup_height);
+                info!(rollup_height = %stop_at_rollup_height, "Stopping at rollup the height");
                 return Ok(None);
             }
             assert!(
@@ -745,7 +769,7 @@ fn error_if_tokio_runtime_is_not_multi_threaded() -> anyhow::Result<()> {
         }
 }
 
-/// Creats a new `DaSyncState`
+/// Creates a new `DaSyncState`
 pub async fn make_da_sync_state<Da: DaService<Error = anyhow::Error>>(
     runner_config: &RunnerConfig,
     stop_at_rollup_height: Option<RollupHeight>,
