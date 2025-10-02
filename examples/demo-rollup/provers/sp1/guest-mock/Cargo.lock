@@ -6505,6 +6505,7 @@ dependencies = [
  "once_cell",
  "schemars 0.8.21",
  "serde",
+ "serde_json",
  "sov-modules-api",
  "sov-risc0-adapter",
  "sov-rollup-interface",

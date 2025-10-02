@@ -1,0 +1,16 @@
+[package]
+name = "value-setter-zk-methods"
+version = "0.1.0"
+edition = "2021"
+
+[package.metadata.risc0]
+methods = ["guest"]
+
+[build-dependencies]
+risc0-build = "2.3"
+
+[dependencies]
+
+[features]
+skip-guest-build = []
+

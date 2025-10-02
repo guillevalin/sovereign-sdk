@@ -2380,6 +2380,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bonsai-sdk"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21055e2f49cbbdbfe9f8f96d597c5527b0c6ab7933341fdc2f147180e48a988e"
+dependencies = [
+ "duplicate",
+ "maybe-async",
+ "reqwest 0.12.23",
+ "serde",
+ "thiserror 2.0.16",
+]
+
+[[package]]
 name = "borrow-or-share"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3977,6 +3990,17 @@ name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
+
+[[package]]
+name = "duplicate"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97af9b5f014e228b33e77d75ee0e6e87960124f0f4b16337b586a6bec91867b1"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "proc-macro2-diagnostics",
+]
 
 [[package]]
 name = "dyn-clone"
@@ -6931,6 +6955,17 @@ checksum = "a06de3016e9fae57a36fd14dba131fccf49f74b40b7fbdb472f96e361ec71a08"
 dependencies = [
  "autocfg",
  "rawpointer",
+]
+
+[[package]]
+name = "maybe-async"
+version = "0.2.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5cf92c10c7e361d6b99666ec1c6f9805b0bea2c3bd8c78dc6fe98ac5bd78db11"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
 ]
 
 [[package]]
@@ -10125,6 +10160,7 @@ dependencies = [
  "addr2line 0.22.0",
  "anyhow",
  "bincode",
+ "bonsai-sdk",
  "borsh",
  "bytemuck",
  "bytes",
@@ -13003,6 +13039,7 @@ dependencies = [
  "sov-uniqueness",
  "sov-universal-wallet",
  "sov-value-setter",
+ "sov-value-setter-zk",
  "strum 0.26.3",
  "tempfile",
  "testcontainers",
@@ -13152,10 +13189,13 @@ name = "sov-value-setter-zk"
 version = "0.3.0"
 dependencies = [
  "anyhow",
+ "bincode",
  "borsh",
  "once_cell",
+ "risc0-zkvm",
  "schemars 0.8.22",
  "serde",
+ "serde_json",
  "sov-address",
  "sov-modules-api",
  "sov-risc0-adapter",
@@ -13166,6 +13206,7 @@ dependencies = [
  "strum 0.26.3",
  "tempfile",
  "thiserror 1.0.69",
+ "value-setter-zk-methods",
 ]
 
 [[package]]
@@ -15584,6 +15625,13 @@ name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
+
+[[package]]
+name = "value-setter-zk-methods"
+version = "0.1.0"
+dependencies = [
+ "risc0-build",
+]
 
 [[package]]
 name = "vcpkg"
