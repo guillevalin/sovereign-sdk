@@ -46,10 +46,14 @@ pub use sov_value_setter::{
     CallMessage as ValueSetterCallMessage, Event as ValueSetterEvent, ValueSetter,
     ValueSetterConfig,
 };
+pub use sov_value_setter_zk::{
+    CallMessage as ValueSetterZkCallMessage, Event as ValueSetterZkEvent, ValueSetterZk,
+    ValueSetterZkConfig, ValueSetterZkProofPayload, ValueSetterZkProofPublicOutput,
+};
 use tokio::sync::watch::{self};
 pub use {
     sov_accounts, sov_attester_incentives, sov_bank, sov_blob_storage, sov_paymaster,
-    sov_value_setter,
+    sov_value_setter, sov_value_setter_zk,
 };
 
 use crate::storage::{ForklessStorageManager, SimpleStorageManager};

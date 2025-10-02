@@ -19,6 +19,8 @@ use sov_paymaster::PaymasterConfig;
 use sov_prover_incentives::ProverIncentivesConfig;
 pub use sov_sequencer_registry::{SequencerConfig, SequencerRegistryConfig};
 pub use sov_state::config::Config as StorageConfig;
+use sov_value_setter::ValueSetterConfig;
+use sov_value_setter_zk::ValueSetterZkConfig;
 
 /// Creates config for a rollup with some default settings, the config is used in demos and tests.
 use crate::runtime::GenesisConfig;
@@ -47,6 +49,10 @@ pub struct GenesisPaths {
     pub paymaster_genesis_path: PathBuf,
     /// Bench pattern genesis path
     pub access_pattern: PathBuf,
+    /// Value-setter genesis path
+    pub value_setter_genesis_path: PathBuf,
+    /// Value-setter-zk genesis path
+    pub value_setter_zk_genesis_path: PathBuf,
 }
 
 impl GenesisPaths {
@@ -67,6 +73,8 @@ impl GenesisPaths {
             chain_state_genesis_path: dir.as_ref().join("chain_state.json"),
             paymaster_genesis_path: dir.as_ref().join("paymaster.json"),
             access_pattern: dir.as_ref().join("access_pattern.json"),
+            value_setter_genesis_path: dir.as_ref().join("value_setter.json"),
+            value_setter_zk_genesis_path: dir.as_ref().join("value_setter_zk.json"),
         }
     }
 }
@@ -110,6 +118,10 @@ where
         read_genesis_json(&genesis_paths.access_pattern)?;
 
     let synthetic_load_config = ();
+    let value_setter_config: ValueSetterConfig<S> =
+        read_genesis_json(&genesis_paths.value_setter_genesis_path)?;
+    let value_setter_zk_config: ValueSetterZkConfig<S> =
+        read_genesis_json(&genesis_paths.value_setter_zk_genesis_path)?;
 
     Ok(GenesisConfig::new(
         bank_config,
@@ -125,6 +137,8 @@ where
         evm_config,
         access_pattern,
         synthetic_load_config,
+        value_setter_config,
+        value_setter_zk_config,
     ))
 }
 

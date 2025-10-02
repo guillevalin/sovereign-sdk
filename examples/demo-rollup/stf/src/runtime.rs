@@ -83,6 +83,10 @@ where
     pub access_pattern: sov_test_modules::access_pattern::AccessPattern<S>,
     /// A module for synthetic load testing and state operations.
     pub synthetic_load: sov_synthetic_load::SyntheticLoad<S>,
+    /// A value setter module without proof requirements.
+    pub value_setter: sov_value_setter::ValueSetter<S>,
+    /// A value setter module that requires zk proofs for updates.
+    pub value_setter_zk: sov_value_setter_zk::ValueSetterZk<S>,
 }
 
 impl<S> sov_modules_stf_blueprint::Runtime<S> for Runtime<S>
