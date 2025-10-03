@@ -69,11 +69,14 @@ fn generate_proof(value: u32) -> anyhow::Result<ValueSetterZkProofPayload> {
     // Generate the proof using the default prover
     eprintln!("Running prover...");
     let prover = default_prover();
+    
+    // Use default STARK proofs (works on all architectures including ARM64/Apple Silicon)
+    // Note: Groth16 proofs (ProverOpts::groth16()) only work on x86_64
     let prove_info = prover.prove_with_ctx(
         env,
         &VerifierContext::default(),
         elf,
-        &ProverOpts::groth16(),
+        &ProverOpts::default(),
     )?;
     
     let receipt = prove_info.receipt;

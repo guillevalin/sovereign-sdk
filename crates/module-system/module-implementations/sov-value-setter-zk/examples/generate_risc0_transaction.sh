@@ -28,12 +28,8 @@ GAS=${2:-"null"}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
-echo "=== RISC0 Proof Generation ===" >&2
-echo "This will generate a real RISC0 proof." >&2
-echo "Depending on your hardware, this may take several minutes..." >&2
-echo "" >&2
-
 # Generate the proof using the RISC0 proof generator
+echo "=== RISC0 Proof Generation ===" >&2
 echo "Generating RISC0 proof for value: $VALUE..." >&2
 
 # Run proof generator and capture output, separating stderr and stdout
@@ -73,5 +69,4 @@ EOF
 
 echo "" >&2
 echo "✓ Transaction JSON with RISC0 proof generated successfully!" >&2
-echo "This proof is ready for production use." >&2
 

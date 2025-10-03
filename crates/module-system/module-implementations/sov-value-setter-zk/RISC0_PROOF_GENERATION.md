@@ -187,6 +187,27 @@ Expected event:
 }
 ```
 
+## Architecture Considerations
+
+### Proof Types and Architecture Support
+
+The proof generator supports different proof types with varying architecture requirements:
+
+1. **STARK Proofs** (Default - `ProverOpts::default()`)
+   - ✅ Works on **all architectures**: x86_64, ARM64 (Apple Silicon), etc.
+   - Larger proof size (~200KB-1MB)
+   - Faster generation time
+   - **Recommended for development and Apple Silicon users**
+
+2. **Groth16 Proofs** (`ProverOpts::groth16()`)
+   - ⚠️ **Only works on x86_64 architecture**
+   - Smaller proof size (~1-2KB)
+   - Requires STARK-to-SNARK conversion
+   - **Will fail on Apple Silicon with**: `stark_to_snark is only supported on x86 architecture`
+   - Recommended for production on x86_64 servers
+
+**Current Implementation**: The proof generator uses `ProverOpts::default()` (STARK proofs) for maximum compatibility.
+
 ## Performance Optimization
 
 ### GPU Acceleration (Optional)
@@ -223,6 +244,17 @@ wait
 ```
 
 ## Troubleshooting
+
+### "stark_to_snark is only supported on x86 architecture"
+
+**Problem**: Getting this error when trying to generate proofs on Apple Silicon (M1/M2/M3 Mac)
+
+**Cause**: The code was using `ProverOpts::groth16()` which requires x86_64 architecture
+
+**Solution**: The proof generator now uses `ProverOpts::default()` (STARK proofs) which works on all architectures. If you modified the code to use Groth16, change it back to:
+```rust
+&ProverOpts::default()  // Instead of ProverOpts::groth16()
+```
 
 ### "Out of Memory" Errors
 
