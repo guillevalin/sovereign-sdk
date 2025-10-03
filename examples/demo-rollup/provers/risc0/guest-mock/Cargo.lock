@@ -1361,6 +1361,8 @@ dependencies = [
  "sov-synthetic-load",
  "sov-test-modules",
  "sov-uniqueness",
+ "sov-value-setter",
+ "sov-value-setter-zk",
  "strum 0.26.3",
 ]
 
@@ -4353,6 +4355,39 @@ dependencies = [
  "proc-macro2",
  "sov-universal-wallet-macro-helpers",
  "syn 2.0.106",
+]
+
+[[package]]
+name = "sov-value-setter"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "borsh",
+ "schemars 0.8.22",
+ "serde",
+ "sov-modules-api",
+ "sov-rollup-interface",
+ "sov-state",
+ "strum 0.26.3",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "sov-value-setter-zk"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "borsh",
+ "once_cell",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sov-modules-api",
+ "sov-risc0-adapter",
+ "sov-rollup-interface",
+ "sov-state",
+ "strum 0.26.3",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

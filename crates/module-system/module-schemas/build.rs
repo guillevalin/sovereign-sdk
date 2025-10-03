@@ -18,6 +18,9 @@ fn main() -> io::Result<()> {
     store_module_call_json_schema::<sov_bank::Bank<S>>("sov-bank.json")?;
     store_module_call_json_schema::<sov_accounts::Accounts<S>>("sov-accounts.json")?;
     store_module_call_json_schema::<sov_value_setter::ValueSetter<S>>("sov-value-setter.json")?;
+    store_module_call_json_schema::<sov_value_setter_zk::ValueSetterZk<S>>(
+        "sov-value-setter-zk.json",
+    )?;
     store_module_call_json_schema::<sov_prover_incentives::ProverIncentives<S>>(
         "sov-prover-incentives.json",
     )?;
@@ -30,6 +33,9 @@ fn main() -> io::Result<()> {
     store_genesis_config_json_schema::<sov_accounts::AccountConfig<S>>("sov-accounts.json")?;
     store_genesis_config_json_schema::<sov_value_setter::ValueSetterConfig<S>>(
         "sov-value-setter.json",
+    )?;
+    store_genesis_config_json_schema::<sov_value_setter_zk::ValueSetterZkConfig<S>>(
+        "sov-value-setter-zk.json",
     )?;
     store_genesis_config_json_schema::<sov_prover_incentives::ProverIncentivesConfig<S>>(
         "sov-prover-incentives.json",

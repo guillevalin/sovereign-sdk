@@ -1,0 +1,73 @@
+[package]
+name = "sov-value-setter-zk"
+description = "A Sovereign SDK example module demonstrating value storage backed by RISC0 proofs"
+authors = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+version = { workspace = true }
+readme = "README.md"
+publish = false
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+sov-address = { workspace = true }
+tempfile = { workspace = true }
+strum = { workspace = true }
+sov-value-setter-zk = { workspace = true, features = ["native"] }
+sov-modules-api = { workspace = true, features = ["native"] }
+sov-test-utils = { workspace = true }
+sov-state = { workspace = true, features = ["native"] }
+
+[dependencies]
+anyhow = { workspace = true }
+strum = { workspace = true }
+sov-modules-api = { workspace = true }
+sov-rollup-interface = { workspace = true }
+sov-risc0-adapter = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+borsh = { workspace = true, features = ["rc"] }
+sov-state = { workspace = true }
+once_cell = { workspace = true }
+
+# Optional dependencies for proof generation
+risc0-zkvm = { version = "2.3", optional = true }
+bincode = { workspace = true, optional = true }
+value-setter-zk-methods = { path = "methods", optional = true }
+
+
+[features]
+default = []
+native = [
+    "sov-modules-api/native",
+    "sov-rollup-interface/native",
+    "sov-value-setter-zk/native",
+    "sov-state/native",
+    "sov-address/native",
+    "sov-risc0-adapter/native"
+]
+# Feature for RISC0 proof generation
+prove = [
+    "native",
+    "risc0-zkvm",
+    "bincode",
+    "value-setter-zk-methods",
+    "risc0-zkvm/prove"
+]
+
+[[example]]
+name = "proof_generator"
+path = "examples/proof_generator.rs"
+required-features = ["native"]
+
+[[example]]
+name = "risc0_proof_generator"
+path = "examples/risc0_proof_generator.rs"
+required-features = ["prove"]

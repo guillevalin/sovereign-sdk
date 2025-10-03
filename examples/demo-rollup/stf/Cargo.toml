@@ -32,6 +32,8 @@ sov-uniqueness = { workspace = true }
 sov-paymaster = { workspace = true }
 sov-operator-incentives = { workspace = true }
 sov-prover-incentives = { workspace = true }
+sov-value-setter = { workspace = true }
+sov-value-setter-zk = { workspace = true }
 sov-rollup-interface = { workspace = true }
 sov-sequencer-registry = { workspace = true }
 sov-state = { workspace = true }
@@ -56,6 +58,8 @@ native = [
     "sov-uniqueness/native",
     "sov-operator-incentives/native",
     "sov-prover-incentives/native",
+    "sov-value-setter/native",
+    "sov-value-setter-zk/native",
     "sov-rollup-interface/native",
     "sov-sequencer-registry/native",
     "sov-state/native",

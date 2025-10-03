@@ -13,6 +13,8 @@ use sov_sequencer_registry::SequencerRegistry;
 use sov_test_modules::access_pattern::AccessPattern;
 use sov_test_utils::runtime::genesis::zk::MinimalZkGenesisConfig;
 use sov_test_utils::runtime::traits::MinimalGenesis;
+use sov_value_setter::ValueSetterConfig;
+use sov_value_setter_zk::ValueSetterZkConfig;
 
 use crate::runtime::{GenesisConfig, Runtime};
 
@@ -39,6 +41,7 @@ where
         paymaster_config: <Paymaster<S> as Genesis>::Config,
         access_pattern_config: <AccessPattern<S> as Genesis>::Config,
     ) -> Self {
+        let value_setter_admin = access_pattern_config.admin.clone();
         Self {
             sequencer_registry: minimal_config.config.sequencer_registry,
             bank: minimal_config.config.bank,
@@ -53,6 +56,12 @@ where
             paymaster: paymaster_config,
             synthetic_load: (),
             access_pattern: access_pattern_config,
+            value_setter: ValueSetterConfig {
+                admin: value_setter_admin.clone(),
+            },
+            value_setter_zk: ValueSetterZkConfig {
+                admin: value_setter_admin,
+            },
         }
     }
 }
