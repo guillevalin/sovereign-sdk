@@ -19,7 +19,7 @@ use crate::evm::RlpEvmTransaction;
 use crate::executor::{get_cfg_env, transact};
 #[cfg(feature = "native")]
 use crate::metrics::EvmTxMetrics;
-use crate::{Evm, PendingTransaction};
+use crate::{gas_metering_mode, Evm, GasMeteringMode, PendingTransaction};
 use anyhow::Context as _;
 
 /// EVM call message.
@@ -82,9 +82,7 @@ where
         start_timer!(fetch_state);
         let (cfg, block, tx_env, tx, pending_len) = self.fetch_state(context, state, tx)?;
         save_elapsed!(fetch_state_time SINCE fetch_state);
-        start_timer!(get_db);
         let db = self.get_db(state);
-        save_elapsed!(get_db_time SINCE get_db);
         let mut db = MetricsDb::new(db);
 
         start_timer!(execution);
@@ -105,13 +103,9 @@ where
         if !result.is_success() {
             return on_revert(*tx.signed_transaction.hash(), result);
         }
-
         #[cfg(feature = "native")]
-        {
-            sov_metrics::track_metrics(|t| {
-                t.submit(db.metrics());
-            });
-        }
+        let db_metrics = db.metrics();
+        drop(db); // To release the state
 
         let gas_used = result.gas_used();
         start_timer!(receipt_t);
@@ -127,6 +121,7 @@ where
         self.pending_transactions.push(&pending_tx, state)?;
         save_elapsed!(set_state_time SINCE set_state);
 
+        start_timer!(get_head_t);
         // Fetch `head` and `pending_len` before the `native` code block.
         // This ensures consistent gas charges between native and non-native execution.
         #[allow(unused_variables)]
@@ -135,6 +130,7 @@ where
             .get(state)?
             // Justified, we set it at `genesis` and leter only override it.
             .expect("Impossible happened: Head must be set.");
+        save_elapsed!(get_head_time SINCE get_head_t);
 
         #[cfg(feature = "native")]
         let set_accessory_state_time = {
@@ -151,15 +147,18 @@ where
             let metrics = EvmTxMetrics {
                 total_time,
                 fetch_state_time,
-                get_db_time,
                 execution_time,
                 state_commit_time,
                 receipt_time,
                 set_state_time,
+                get_head_time,
                 set_accessory_state_time,
             };
             sov_metrics::track_metrics(|t| {
                 t.submit(metrics);
+            });
+            sov_metrics::track_metrics(|t| {
+                t.submit(db_metrics);
             });
         }
 
@@ -187,6 +186,17 @@ where
         }
     }
 
+    fn sequencer_gas_used(&self, state: &mut impl TxState<S>) -> u64 {
+        let gas_meter = state.try_as_basic_gas_meter().unwrap();
+        let sequencer_gas_used =
+            gas_meter.initial_gas.as_ref()[0] - gas_meter.remaining_gas.as_ref()[0];
+        let evm_gas_to_sequencer_gas_ratio =
+            <S as GasSpec>::gas_to_charge_per_evm_gas().as_ref()[0];
+        sequencer_gas_used
+            .checked_div(evm_gas_to_sequencer_gas_ratio)
+            .expect("gas_to_charge_per_evm_gas() is zero")
+    }
+
     fn get_receipt(
         &self,
         tx: &TxSignedAndRecovered,
@@ -207,15 +217,11 @@ where
                 .expect("Impossible happened: Log index overflow.")
         });
         let is_success = result.is_success();
-        let gas_meter = state.try_as_basic_gas_meter().unwrap();
-        let sequencer_gas_used =
-            gas_meter.initial_gas.as_ref()[0] - gas_meter.remaining_gas.as_ref()[0];
-        let evm_gas_to_sequencer_gas_ratio =
-            <S as GasSpec>::gas_to_charge_per_evm_gas().as_ref()[0];
-        let scaled_sequencer_gas_used = sequencer_gas_used
-            .checked_div(evm_gas_to_sequencer_gas_ratio)
-            .expect("gas_to_charge_per_evm_gas() is zero");
-        let gas_used = scaled_sequencer_gas_used + result.gas_used();
+        let gas_used = result.gas_used()
+            + match gas_metering_mode() {
+                GasMeteringMode::Rollup => self.sequencer_gas_used(state),
+                GasMeteringMode::Evm => 0,
+            };
         let logs = result.into_logs();
         let transaction_hash = *tx.signed_transaction.hash();
         tracing::debug!(
